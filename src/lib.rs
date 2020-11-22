@@ -40,19 +40,19 @@ pub type MessageHandler = fn(APRSMessage);
 
 pub struct IS {
     settings: ISSettings,
-    message_handler: MessageHandler,
+    message_handler: Option<MessageHandler>,
 }
 
 impl IS {
     pub fn new(settings: ISSettings) -> IS {
         IS {
             settings,
-            message_handler: IS::null_message_handler,
+            message_handler: None,
         }
     }
 
     pub fn register_message_handler(&mut self, handler: MessageHandler) {
-        self.message_handler = handler;
+        self.message_handler = Some(handler);
     }
 
     #[tokio::main]
@@ -83,11 +83,9 @@ impl IS {
         writer.send(login_message).await?;
 
         while let Some(Ok(line)) = reader.next().await {
-            (self.message_handler)(APRSMessage { raw: line });
+            self.message_handler.unwrap()(APRSMessage {raw: line});
         }
-
+        
         Ok(())
     }
-
-    fn null_message_handler(_message: APRSMessage) {}
 }
