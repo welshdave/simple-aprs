@@ -83,7 +83,9 @@ impl IS {
         writer.send(login_message).await?;
 
         while let Some(Ok(line)) = reader.next().await {
-            self.message_handler.unwrap()(APRSMessage {raw: line});
+            if let Some(handler) = self.message_handler {
+                handler(APRSMessage {raw: line});
+            }
         }
         
         Ok(())
