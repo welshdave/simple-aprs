@@ -1,0 +1,13 @@
+[package]
+name = "simple-aprs"
+version = "0.1.0"
+authors = ["Dave Lewis <dave@dllewis.org>"]
+edition = "2018"
+description = "APRS Library to interact with APRS-IS servers"
+license = "MIT"
+exclude = [".gitignore"]
+
+[dependencies]
+futures = "0.3"
+tokio = { version = "0.3.4", default-features=false, features=["full"] }
+tokio-util = { version = "0.5.0", features = ["codec"] }
