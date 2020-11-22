@@ -84,10 +84,10 @@ impl IS {
 
         while let Some(Ok(line)) = reader.next().await {
             if let Some(handler) = self.message_handler {
-                handler(APRSMessage {raw: line});
+                handler(APRSMessage { raw: line });
             }
         }
-        
+
         Ok(())
     }
 }
