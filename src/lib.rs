@@ -1,10 +1,12 @@
+use std::error::Error;
+use std::time::Duration;
+
 use futures::sink::SinkExt;
 use futures::StreamExt;
 
 use tokio::net::TcpStream;
+use tokio::time;
 use tokio_util::codec::{FramedRead, FramedWrite, LinesCodec};
-
-use std::error::Error;
 
 pub struct APRSMessage {
     pub raw: String,
@@ -59,9 +61,9 @@ impl IS {
     pub async fn connect(&self) -> Result<(), Box<dyn Error>> {
         let address = format!("{}:{}", self.settings.host, self.settings.port);
 
-        let mut stream = TcpStream::connect(address).await?;
+        let stream = TcpStream::connect(address).await?;
 
-        let (r, w) = stream.split();
+        let (r, w) = stream.into_split();
 
         let mut writer = FramedWrite::new(w, LinesCodec::new());
         let mut reader = FramedRead::new(r, LinesCodec::new());
@@ -82,9 +84,19 @@ impl IS {
 
         writer.send(login_message).await?;
 
+        tokio::spawn(async move {
+            let mut interval = time::interval(Duration::from_secs(3600));
+            loop {
+                interval.tick().await;
+                writer.send("# keep alive").await.unwrap();
+            }
+        });
+
         while let Some(Ok(line)) = reader.next().await {
-            if let Some(handler) = self.message_handler {
-                handler(APRSMessage { raw: line });
+            if !line.starts_with('#') {
+                if let Some(handler) = self.message_handler {
+                    handler(APRSMessage { raw: line });
+                }
             }
         }
 
