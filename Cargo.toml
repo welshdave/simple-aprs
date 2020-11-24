@@ -11,3 +11,6 @@ exclude = [".gitignore"]
 futures = "0.3"
 tokio = { version = "0.3.4", default-features=false, features=["full"] }
 tokio-util = { version = "0.5.0", features = ["codec"] }
+
+[dev-dependencies]
+arguments = "0.6.2"
