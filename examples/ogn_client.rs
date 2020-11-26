@@ -1,7 +1,14 @@
 use simple_aprs::*;
 
 fn aprs_message_handler(message: APRSMessage) {
-    println!("{}", message.raw);
+    match String::from_utf8(message.raw) {
+        Ok(msg) => {
+            println!("{:?}", msg);
+        }
+        Err(err) => {
+            println!("Error converting APRS packet to UTF8: {}", err);
+        }
+    }
 }
 
 fn main() {
@@ -13,9 +20,7 @@ fn main() {
         "".to_string(),
     );
 
-    let mut aprs_is = IS::new(settings);
-
-    aprs_is.register_message_handler(aprs_message_handler);
+    let aprs_is = IS::new(settings, aprs_message_handler);
 
     aprs_is.connect();
 }

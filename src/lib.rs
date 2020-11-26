@@ -4,12 +4,14 @@ use std::time::Duration;
 use futures::sink::SinkExt;
 use futures::StreamExt;
 
+use log::{error, info, trace, warn};
+
 use tokio::net::TcpStream;
 use tokio::time;
-use tokio_util::codec::{FramedRead, FramedWrite, LinesCodec};
+use tokio_util::codec::{BytesCodec, FramedRead, FramedWrite, LinesCodec};
 
 pub struct APRSMessage {
-    pub raw: String,
+    pub raw: Vec<u8>,
 }
 
 pub struct ISSettings {
@@ -42,19 +44,15 @@ pub type MessageHandler = fn(APRSMessage);
 
 pub struct IS {
     settings: ISSettings,
-    message_handler: Option<MessageHandler>,
+    message_handler: MessageHandler,
 }
 
 impl IS {
-    pub fn new(settings: ISSettings) -> IS {
+    pub fn new(settings: ISSettings, message_handler: MessageHandler) -> IS {
         IS {
             settings,
-            message_handler: None,
+            message_handler,
         }
-    }
-
-    pub fn register_message_handler(&mut self, handler: MessageHandler) {
-        self.message_handler = Some(handler);
     }
 
     #[tokio::main]
@@ -66,7 +64,7 @@ impl IS {
         let (r, w) = stream.into_split();
 
         let mut writer = FramedWrite::new(w, LinesCodec::new());
-        let mut reader = FramedRead::new(r, LinesCodec::new());
+        let mut reader = FramedRead::new(r, BytesCodec::new());
 
         let login_message = {
             let name = option_env!("CARGO_PKG_NAME").unwrap_or("unknown");
@@ -92,10 +90,26 @@ impl IS {
             }
         });
 
-        while let Some(Ok(line)) = reader.next().await {
-            if !line.starts_with('#') {
-                if let Some(handler) = self.message_handler {
-                    handler(APRSMessage { raw: line });
+        while let Some(message) = reader.next().await {
+            match message {
+                Ok(mut message) => {
+                    message.truncate(message.len() - 2);
+                    if message[0] == b'#' {
+                        match String::from_utf8(message.to_vec()) {
+                            Ok(server_message) => {
+                                trace!("Recieved server response: {}", server_message)
+                                // check logged in etc.
+                            }
+                            Err(err) => warn!("Error processing server response: {}", err),
+                        }
+                    } else {
+                        (self.message_handler)(APRSMessage {
+                            raw: (message).to_vec(),
+                        });
+                    }
+                }
+                Err(err) => {
+                    warn!("Error processing message from APRS-IS server: {}", err);
                 }
             }
         }
