@@ -4,7 +4,7 @@ use std::time::Duration;
 use futures::sink::SinkExt;
 use futures::StreamExt;
 
-use log::{error, info, trace, warn};
+use log::{info, trace, warn};
 
 use tokio::net::TcpStream;
 use tokio::time;
@@ -19,7 +19,7 @@ pub struct ISSettings {
     pub port: u16,
     pub callsign: String,
     pub passcode: String,
-    pub command: String,
+    pub filter: String,
 }
 
 impl ISSettings {
@@ -28,14 +28,14 @@ impl ISSettings {
         port: u16,
         callsign: String,
         passcode: String,
-        command: String,
+        filter: String,
     ) -> ISSettings {
         ISSettings {
             host,
             port,
             callsign,
             passcode,
-            command,
+            filter,
         }
     }
 }
@@ -76,10 +76,16 @@ impl IS {
                 self.settings.passcode,
                 name,
                 version,
-                self.settings.command
+                if self.settings.filter == "" {
+                    "".to_string()
+                } else {
+                    format!("filter {}", self.settings.filter)
+                }
             )
         };
 
+        info!("Logging on to APRS-IS server");
+        trace!("Login message: {}", login_message);
         writer.send(login_message).await?;
 
         tokio::spawn(async move {

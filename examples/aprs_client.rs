@@ -24,7 +24,7 @@ fn main() {
         14580,
         callsign.to_string(),
         passcode.to_string(),
-        "filter r/55/-4/600".to_string(),
+        "r/55/-4/600".to_string(),
     );
 
     let aprs_is = IS::new(settings, aprs_message_handler);
