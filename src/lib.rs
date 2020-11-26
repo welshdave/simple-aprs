@@ -71,7 +71,7 @@ impl IS {
             let version = option_env!("CARGO_PKG_VERSION").unwrap_or("0.0.0");
 
             format!(
-                "user {} pass {} vers {} {} {}",
+                "user {} pass {} vers {} {}{}",
                 self.settings.callsign,
                 self.settings.passcode,
                 name,
@@ -79,7 +79,7 @@ impl IS {
                 if self.settings.filter == "" {
                     "".to_string()
                 } else {
-                    format!("filter {}", self.settings.filter)
+                    format!(" filter {}", self.settings.filter)
                 }
             )
         };
