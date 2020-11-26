@@ -4,12 +4,8 @@ use simple_aprs::*;
 
 fn aprs_message_handler(message: APRSMessage) {
     match String::from_utf8(message.raw) {
-        Ok(msg) => {
-            println!("{:?}", msg);
-        }
-        Err(err) => {
-            println!("Error converting APRS packet to UTF8: {}", err);
-        }
+        Ok(msg) => println!("{:?}", msg),
+        Err(err) => println!("Error converting APRS packet to UTF8: {}", err),
     }
 }
 
@@ -29,5 +25,8 @@ fn main() {
 
     let aprs_is = IS::new(settings, aprs_message_handler);
 
-    aprs_is.connect();
+    match aprs_is.connect() {
+        Ok(()) => println!("Disconnected"),
+        Err(err) => println!("An error occured: {}", err),
+    }
 }
