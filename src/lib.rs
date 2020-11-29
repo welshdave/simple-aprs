@@ -1,3 +1,6 @@
+extern crate aprs;
+extern crate fap;
+
 use std::error::Error;
 use std::time::Duration;
 
@@ -10,8 +13,25 @@ use tokio::net::TcpStream;
 use tokio::time;
 use tokio_util::codec::{BytesCodec, FramedRead, FramedWrite, LinesCodec};
 
-pub struct APRSMessage {
+pub struct APRSPacket {
     pub raw: Vec<u8>,
+}
+
+impl APRSPacket {
+    pub fn parsed(&self) -> Result<Box<dyn aprs::Packet>, Box<dyn Error>> {
+        let raw_packet = self.raw.clone();
+        let parsed = fap::Packet::new(raw_packet);
+        match parsed {
+            Ok(packet) => {
+                let boxed_packet = Box::new(packet);
+                return Ok(boxed_packet);
+            }
+            Err(err) => {
+                let boxed_error = Box::new(err);
+                return Err(boxed_error);
+            }
+        }
+    }
 }
 
 pub struct ISSettings {
@@ -40,18 +60,18 @@ impl ISSettings {
     }
 }
 
-pub type MessageHandler = fn(APRSMessage);
+pub type PacketHandler = fn(APRSPacket);
 
 pub struct IS {
     settings: ISSettings,
-    message_handler: MessageHandler,
+    packet_handler: PacketHandler,
 }
 
 impl IS {
-    pub fn new(settings: ISSettings, message_handler: MessageHandler) -> IS {
+    pub fn new(settings: ISSettings, packet_handler: PacketHandler) -> IS {
         IS {
             settings,
-            message_handler,
+            packet_handler,
         }
     }
 
@@ -92,30 +112,38 @@ impl IS {
             let mut interval = time::interval(Duration::from_secs(3600));
             loop {
                 interval.tick().await;
+                info!("Sending keep alive message to APRS-IS server");
                 writer.send("# keep alive").await.unwrap();
             }
         });
 
-        while let Some(message) = reader.next().await {
-            match message {
-                Ok(mut message) => {
-                    message.truncate(message.len() - 2);
-                    if message[0] == b'#' {
-                        match String::from_utf8(message.to_vec()) {
+        while let Some(packet) = reader.next().await {
+            match packet {
+                Ok(mut packet) => {
+                    packet.truncate(packet.len() - 2);
+                    if packet[0] == b'#' {
+                        match String::from_utf8(packet.to_vec()) {
                             Ok(server_message) => {
-                                trace!("Recieved server response: {}", server_message)
-                                // check logged in etc.
+                                trace!("Received server response: {}", server_message);
+                                if server_message.contains("unverified") {
+                                    info!("User not verified on APRS-IS server");
+                                    continue;
+                                }
+                                if server_message.contains(" verified") {
+                                    info!("User verified on APRS-IS server");
+                                }
                             }
                             Err(err) => warn!("Error processing server response: {}", err),
                         }
                     } else {
-                        (self.message_handler)(APRSMessage {
-                            raw: (message).to_vec(),
+                        trace!("{:?}", packet);
+                        (self.packet_handler)(APRSPacket {
+                            raw: packet.to_vec(),
                         });
                     }
                 }
                 Err(err) => {
-                    warn!("Error processing message from APRS-IS server: {}", err);
+                    warn!("Error processing packet from APRS-IS server: {}", err);
                 }
             }
         }
