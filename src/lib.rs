@@ -120,6 +120,9 @@ impl IS {
         while let Some(packet) = reader.next().await {
             match packet {
                 Ok(mut packet) => {
+                    if packet.len() <= 2 {
+                        continue;
+                    }
                     packet.truncate(packet.len() - 2);
                     if packet[0] == b'#' {
                         match String::from_utf8(packet.to_vec()) {
