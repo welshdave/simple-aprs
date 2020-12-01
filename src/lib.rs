@@ -23,12 +23,10 @@ impl APRSPacket {
         let parsed = fap::Packet::new(raw_packet);
         match parsed {
             Ok(packet) => {
-                let boxed_packet = Box::new(packet);
-                return Ok(boxed_packet);
+                Ok(Box::new(packet))
             }
             Err(err) => {
-                let boxed_error = Box::new(err);
-                return Err(boxed_error);
+                Err(Box::new(err))
             }
         }
     }
