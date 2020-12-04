@@ -13,12 +13,13 @@ fn aprs_packet_handler(packet: APRSPacket) {
                 None => (),
             }
         }
-        Err(err) => println!("Error parsing packet: {}", err),
-    }
-
-    match String::from_utf8(packet.raw) {
-        Ok(msg) => println!("{:?}", msg),
-        Err(err) => println!("Error converting APRS packet to UTF8: {}", err),
+        Err(err) =>  {
+            println!("Error parsing packet: {}", err);
+            match String::from_utf8(packet.raw) {
+                Ok(msg) => println!("{:?}", msg),
+                Err(err) => println!("Error converting APRS packet to UTF8: {}", err),
+            }
+        }
     }
 }
 
