@@ -1,6 +1,8 @@
 extern crate aprs;
 extern crate fap;
 
+mod codec;
+
 use std::error::Error;
 use std::time::Duration;
 
@@ -11,7 +13,7 @@ use log::{info, trace, warn};
 
 use tokio::net::TcpStream;
 use tokio::time;
-use tokio_util::codec::{BytesCodec, FramedRead, FramedWrite, LinesCodec};
+use tokio_util::codec::{FramedRead, FramedWrite};
 
 pub struct APRSPacket {
     pub raw: Vec<u8>,
@@ -22,12 +24,8 @@ impl APRSPacket {
         let raw_packet = self.raw.clone();
         let parsed = fap::Packet::new(raw_packet);
         match parsed {
-            Ok(packet) => {
-                Ok(Box::new(packet))
-            }
-            Err(err) => {
-                Err(Box::new(err))
-            }
+            Ok(packet) => Ok(Box::new(packet)),
+            Err(err) => Err(Box::new(err)),
         }
     }
 }
@@ -81,8 +79,8 @@ impl IS {
 
         let (r, w) = stream.into_split();
 
-        let mut writer = FramedWrite::new(w, LinesCodec::new());
-        let mut reader = FramedRead::new(r, BytesCodec::new());
+        let mut writer = FramedWrite::new(w, codec::ByteLinesCodec::new());
+        let mut reader = FramedRead::new(r, codec::ByteLinesCodec::new());
 
         let login_message = {
             let name = option_env!("CARGO_PKG_NAME").unwrap_or("unknown");
@@ -104,24 +102,20 @@ impl IS {
 
         info!("Logging on to APRS-IS server");
         trace!("Login message: {}", login_message);
-        writer.send(login_message).await?;
+        writer.send(login_message.as_bytes()).await?;
 
         tokio::spawn(async move {
             let mut interval = time::interval(Duration::from_secs(3600));
             loop {
                 interval.tick().await;
                 info!("Sending keep alive message to APRS-IS server");
-                writer.send("# keep alive").await.unwrap();
+                writer.send("# keep alive".as_bytes()).await.unwrap();
             }
         });
 
         while let Some(packet) = reader.next().await {
             match packet {
-                Ok(mut packet) => {
-                    if packet.len() <= 2 {
-                        continue;
-                    }
-                    packet.truncate(packet.len() - 2);
+                Ok(packet) => {
                     if packet[0] == b'#' {
                         match String::from_utf8(packet.to_vec()) {
                             Ok(server_message) => {
