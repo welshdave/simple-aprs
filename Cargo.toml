@@ -4,7 +4,10 @@ version = "0.1.0"
 authors = ["Dave Lewis <dave@dllewis.org>"]
 edition = "2018"
 description = "APRS Library to interact with APRS-IS servers"
+readme = "README.md"
+keywords = ["aprs", "amateur-radio"]
 license = "MIT"
+repository = "https://github.com/welshdave/simple-aprs.git"
 exclude = [".gitignore"]
 
 [dependencies]
