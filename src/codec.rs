@@ -26,26 +26,24 @@ impl Decoder for ByteLinesCodec {
     type Error = io::Error;
 
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<BytesMut>, io::Error> {
-        loop {
-            let read_to = buf.len();
+        let read_to = buf.len();
 
-            let newline_offset = buf[self.next_index..read_to]
-                .iter()
-                .position(|b| *b == b'\n');
+        let newline_offset = buf[self.next_index..read_to]
+            .iter()
+            .position(|b| *b == b'\n');
 
-            match newline_offset {
-                Some(offset) => {
-                    let newline_index = offset + self.next_index;
-                    self.next_index = 0;
-                    let mut line = buf.split_to(newline_index + 1);
-                    line.truncate(line.len() - 1);
-                    without_carriage_return(&mut line);
-                    return Ok(Some(line));
-                }
-                None => {
-                    self.next_index = read_to;
-                    return Ok(None);
-                }
+        match newline_offset {
+            Some(offset) => {
+                let newline_index = offset + self.next_index;
+                self.next_index = 0;
+                let mut line = buf.split_to(newline_index + 1);
+                line.truncate(line.len() - 1);
+                without_carriage_return(&mut line);
+                Ok(Some(line))
+            }
+            None => {
+                self.next_index = read_to;
+                Ok(None)
             }
         }
     }

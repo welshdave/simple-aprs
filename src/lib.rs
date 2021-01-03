@@ -92,7 +92,7 @@ impl IS {
                 self.settings.passcode,
                 name,
                 version,
-                if self.settings.filter == "" {
+                if self.settings.filter.is_empty() {
                     "".to_string()
                 } else {
                     format!(" filter {}", self.settings.filter)
