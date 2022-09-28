@@ -1,17 +1,15 @@
 extern crate pretty_env_logger;
 
+use futures::stream::StreamExt;
 use std::env;
 
 use simple_aprs::*;
 
-fn aprs_packet_handler(packet: APRSPacket) {
+async fn aprs_packet_handler(packet: RawPacket) {
     match packet.parsed() {
         Ok(parsed) => {
-            println!("Source: {}", parsed.source());
-            match parsed.destination() {
-                Some(destination) => println!("Destination: {}", destination),
-                None => (),
-            }
+            println!("Source: {}", parsed.from);
+            println!("Destination: {}", parsed.to);
         }
         Err(err) => {
             println!("Error parsing packet: {}", err);
@@ -23,7 +21,8 @@ fn aprs_packet_handler(packet: APRSPacket) {
     }
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     pretty_env_logger::init();
 
     let args = arguments::parse(env::args()).unwrap();
@@ -39,10 +38,12 @@ fn main() {
         "r/55/-4/600".to_string(),
     );
 
-    let aprs_is = IS::new(settings, aprs_packet_handler);
+    let mut aprs_is = ISConnection::connect(&settings)
+        .await
+        .expect("An error occurred while connecting");
 
-    match aprs_is.connect() {
-        Ok(()) => println!("Disconnected"),
-        Err(err) => println!("An error occured: {}", err),
-    }
+    aprs_is
+        .stream()
+        .for_each(|x| aprs_packet_handler(x.expect("Error occurred while receiving packets")))
+        .await;
 }
