@@ -156,12 +156,15 @@ impl ISConnection {
             loop {
                 interval.tick().await;
                 info!("Sending keep alive message to APRS-IS server");
-                writer
+                if writer
                     .lock()
                     .await
                     .send("# keep alive".as_bytes())
                     .await
-                    .unwrap();
+                    .is_err()
+                {
+                    break;
+                }
             }
         })
     }
