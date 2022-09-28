@@ -5,8 +5,8 @@ use aprs_parser::{AprsError, AprsPacket};
 use async_stream::try_stream;
 use futures::sink::SinkExt;
 use futures::{Stream, StreamExt};
-use log::{info, trace, warn};
-use std::error::Error;
+use log::{info, trace};
+use std::io;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::{
@@ -64,7 +64,7 @@ pub struct ISConnection {
 }
 
 impl ISConnection {
-    pub async fn connect(settings: &ISSettings) -> Result<Self, Box<dyn Error>> {
+    pub async fn connect(settings: &ISSettings) -> Result<Self, io::Error> {
         let (mut writer, reader) = Self::init_connect(settings).await?;
         Self::login(settings, &mut writer).await?;
         let writer = Arc::new(Mutex::new(writer));
@@ -101,7 +101,7 @@ impl ISConnection {
         }
     }
 
-    async fn init_connect(settings: &ISSettings) -> Result<(Writer, Reader), Box<dyn Error>> {
+    async fn init_connect(settings: &ISSettings) -> io::Result<(Writer, Reader)> {
         let address = format!("{}:{}", settings.host, settings.port);
 
         let stream = TcpStream::connect(address).await?;
@@ -114,7 +114,7 @@ impl ISConnection {
         Ok((writer, reader))
     }
 
-    async fn login(settings: &ISSettings, writer: &mut Writer) -> Result<(), Box<dyn Error>> {
+    async fn login(settings: &ISSettings, writer: &mut Writer) -> io::Result<()> {
         let login_message = {
             let name = option_env!("CARGO_PKG_NAME").unwrap_or("unknown");
             let version = option_env!("CARGO_PKG_VERSION").unwrap_or("0.0.0");
