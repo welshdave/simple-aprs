@@ -101,6 +101,15 @@ impl ISConnection {
         }
     }
 
+    pub async fn send(&mut self, packet: &AprsPacket) -> Result<(), error::ISSendError> {
+        let mut buf = vec![];
+        packet.encode(&mut buf)?;
+
+        self.writer.lock().await.send(&buf).await?;
+
+        Ok(())
+    }
+
     async fn init_connect(settings: &ISSettings) -> io::Result<(Writer, Reader)> {
         let address = format!("{}:{}", settings.host, settings.port);
 
