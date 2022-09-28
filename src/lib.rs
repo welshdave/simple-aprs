@@ -93,6 +93,7 @@ impl ISReader {
     }
 }
 
+#[derive(Clone)]
 pub struct ISWriter {
     writer: Arc<Mutex<Writer>>,
 
