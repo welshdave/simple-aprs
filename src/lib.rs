@@ -1,3 +1,4 @@
+mod abort;
 mod codec;
 mod error;
 
@@ -57,26 +58,16 @@ impl ISSettings {
     }
 }
 
-pub struct ISConnection {
+pub struct ISReader {
     reader: Reader,
-    writer: Arc<Mutex<Writer>>,
-    heartbeat_handler: JoinHandle<()>,
+
+    // Used to kill the heartbeat task
+    // Once reader + writer are out of scope
+    #[allow(dead_code)]
+    handler: Arc<Mutex<abort::AbortOnDrop<()>>>,
 }
 
-impl ISConnection {
-    pub async fn connect(settings: &ISSettings) -> Result<Self, io::Error> {
-        let (mut writer, reader) = Self::init_connect(settings).await?;
-        Self::login(settings, &mut writer).await?;
-        let writer = Arc::new(Mutex::new(writer));
-        let heartbeat_handler = Self::heartbeat(writer.clone()).await;
-
-        Ok(Self {
-            reader,
-            writer,
-            heartbeat_handler,
-        })
-    }
-
+impl ISReader {
     pub fn stream(&mut self) -> impl Stream<Item = Result<RawPacket, error::ISReadError>> + '_ {
         try_stream! {
             while let Some(packet) = self.reader.next().await {
@@ -100,7 +91,18 @@ impl ISConnection {
             }
         }
     }
+}
 
+pub struct ISWriter {
+    writer: Arc<Mutex<Writer>>,
+
+    // Used to kill the heartbeat task
+    // Once reader + writer are out of scope
+    #[allow(dead_code)]
+    handler: Arc<Mutex<abort::AbortOnDrop<()>>>,
+}
+
+impl ISWriter {
     pub async fn send(&mut self, packet: &AprsPacket) -> Result<(), error::ISSendError> {
         let mut buf = vec![];
         packet.encode(&mut buf)?;
@@ -109,8 +111,45 @@ impl ISConnection {
 
         Ok(())
     }
+}
 
-    async fn init_connect(settings: &ISSettings) -> io::Result<(Writer, Reader)> {
+pub struct ISConnection {
+    reader: ISReader,
+    writer: ISWriter,
+}
+
+impl ISConnection {
+    pub async fn connect(settings: &ISSettings) -> Result<Self, io::Error> {
+        let (reader, mut writer) = Self::init_connect(settings).await?;
+        Self::login(settings, &mut writer).await?;
+
+        let writer = Arc::new(Mutex::new(writer));
+        let handler = Arc::new(Mutex::new(abort::AbortOnDrop::new(
+            Self::heartbeat(writer.clone()).await,
+        )));
+
+        let reader = ISReader {
+            reader,
+            handler: handler.clone(),
+        };
+        let writer = ISWriter { writer, handler };
+
+        Ok(Self { reader, writer })
+    }
+
+    pub fn stream(&mut self) -> impl Stream<Item = Result<RawPacket, error::ISReadError>> + '_ {
+        self.reader.stream()
+    }
+
+    pub async fn send(&mut self, packet: &AprsPacket) -> Result<(), error::ISSendError> {
+        self.writer.send(packet).await
+    }
+
+    pub fn split(self) -> (ISReader, ISWriter) {
+        (self.reader, self.writer)
+    }
+
+    async fn init_connect(settings: &ISSettings) -> io::Result<(Reader, Writer)> {
         let address = format!("{}:{}", settings.host, settings.port);
 
         let stream = TcpStream::connect(address).await?;
@@ -120,7 +159,7 @@ impl ISConnection {
         let writer = FramedWrite::new(w, codec::ByteLinesCodec::new());
         let reader = FramedRead::new(r, codec::ByteLinesCodec::new());
 
-        Ok((writer, reader))
+        Ok((reader, writer))
     }
 
     async fn login(settings: &ISSettings, writer: &mut Writer) -> io::Result<()> {
@@ -149,8 +188,8 @@ impl ISConnection {
         Ok(())
     }
 
-    // TODO need a way for this to terminate
     async fn heartbeat(writer: Arc<Mutex<Writer>>) -> JoinHandle<()> {
+        // Automatically terminates once the reader and writer are dropped
         tokio::spawn(async move {
             let mut interval = time::interval(Duration::from_secs(3600));
             loop {
@@ -167,11 +206,5 @@ impl ISConnection {
                 }
             }
         })
-    }
-}
-
-impl Drop for ISConnection {
-    fn drop(&mut self) {
-        self.heartbeat_handler.abort();
     }
 }
