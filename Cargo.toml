@@ -11,7 +11,7 @@ repository = "https://github.com/welshdave/simple-aprs.git"
 exclude = [".gitignore"]
 
 [dependencies]
-aprs-parser = { path = "../aprs-parser-rs" }
+aprs-parser = "0.3"
 async-stream = "0.3"
 bytes = "1.0.0"
 futures = "0.3"
