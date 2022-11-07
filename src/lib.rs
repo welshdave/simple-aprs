@@ -1,32 +1,34 @@
-extern crate aprs;
-extern crate fap;
-
+mod abort;
 mod codec;
+mod error;
 
-use std::error::Error;
-use std::time::Duration;
-
+use aprs_parser::{AprsError, AprsPacket};
+use async_stream::try_stream;
 use futures::sink::SinkExt;
-use futures::StreamExt;
-
-use log::{info, trace, warn};
-
-use tokio::net::TcpStream;
+use futures::{Stream, StreamExt};
+use log::{info, trace};
+use std::io;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::net::{
+    tcp::{OwnedReadHalf, OwnedWriteHalf},
+    TcpStream,
+};
+use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
 use tokio::time;
 use tokio_util::codec::{FramedRead, FramedWrite};
 
-pub struct APRSPacket {
+type Reader = FramedRead<OwnedReadHalf, codec::ByteLinesCodec>;
+type Writer = FramedWrite<OwnedWriteHalf, codec::ByteLinesCodec>;
+
+pub struct RawPacket {
     pub raw: Vec<u8>,
 }
 
-impl APRSPacket {
-    pub fn parsed(&self) -> Result<Box<dyn aprs::Packet>, Box<dyn Error>> {
-        let raw_packet = self.raw.clone();
-        let parsed = fap::Packet::new(raw_packet);
-        match parsed {
-            Ok(packet) => Ok(Box::new(packet)),
-            Err(err) => Err(Box::new(err)),
-        }
+impl RawPacket {
+    pub fn parsed(&self) -> Result<AprsPacket, AprsError> {
+        aprs_parser::parse(&self.raw)
     }
 }
 
@@ -56,46 +58,126 @@ impl ISSettings {
     }
 }
 
-pub type PacketHandler = fn(APRSPacket);
+pub struct ISReader {
+    reader: Reader,
 
-pub struct IS {
-    settings: ISSettings,
-    packet_handler: PacketHandler,
+    // Used to kill the heartbeat task
+    // Once reader + writer are out of scope
+    #[allow(dead_code)]
+    handler: Arc<Mutex<abort::AbortOnDrop<()>>>,
 }
 
-impl IS {
-    pub fn new(settings: ISSettings, packet_handler: PacketHandler) -> IS {
-        IS {
-            settings,
-            packet_handler,
+impl ISReader {
+    pub fn stream(&mut self) -> impl Stream<Item = Result<RawPacket, error::ISReadError>> + '_ {
+        try_stream! {
+            while let Some(packet) = self.reader.next().await {
+                let packet = packet?;
+                if packet[0] == b'#' {
+                    let server_message = String::from_utf8(packet.to_vec())?;
+                    trace!("Received server response: {}", server_message);
+                    if server_message.contains("unverified") {
+                        info!("User not verified on APRS-IS server");
+                        continue;
+                    }
+                    if server_message.contains(" verified") {
+                        info!("User verified on APRS-IS server");
+                    }
+                } else {
+                    trace!("{:?}", packet);
+                    yield RawPacket {
+                        raw: packet.to_vec(),
+                    };
+                }
+            }
         }
     }
+}
 
-    #[tokio::main]
-    pub async fn connect(&self) -> Result<(), Box<dyn Error>> {
-        let address = format!("{}:{}", self.settings.host, self.settings.port);
+#[derive(Clone)]
+pub struct ISWriter {
+    writer: Arc<Mutex<Writer>>,
+
+    // Used to kill the heartbeat task
+    // Once reader + writer are out of scope
+    #[allow(dead_code)]
+    handler: Arc<Mutex<abort::AbortOnDrop<()>>>,
+}
+
+impl ISWriter {
+    pub async fn send(&mut self, packet: &AprsPacket) -> Result<(), error::ISSendError> {
+        let mut buf = vec![];
+        packet.encode(&mut buf)?;
+
+        self.writer.lock().await.send(&buf).await?;
+
+        Ok(())
+    }
+}
+
+pub struct ISConnection {
+    reader: ISReader,
+    writer: ISWriter,
+}
+
+impl ISConnection {
+    pub async fn connect(settings: &ISSettings) -> Result<Self, io::Error> {
+        let (reader, mut writer) = Self::init_connect(settings).await?;
+        Self::login(settings, &mut writer).await?;
+
+        let writer = Arc::new(Mutex::new(writer));
+        let handler = Arc::new(Mutex::new(abort::AbortOnDrop::new(
+            Self::heartbeat(writer.clone()).await,
+        )));
+
+        let reader = ISReader {
+            reader,
+            handler: handler.clone(),
+        };
+        let writer = ISWriter { writer, handler };
+
+        Ok(Self { reader, writer })
+    }
+
+    pub fn stream(&mut self) -> impl Stream<Item = Result<RawPacket, error::ISReadError>> + '_ {
+        self.reader.stream()
+    }
+
+    pub async fn send(&mut self, packet: &AprsPacket) -> Result<(), error::ISSendError> {
+        self.writer.send(packet).await
+    }
+
+    pub fn split(self) -> (ISReader, ISWriter) {
+        (self.reader, self.writer)
+    }
+
+    async fn init_connect(settings: &ISSettings) -> io::Result<(Reader, Writer)> {
+        let address = format!("{}:{}", settings.host, settings.port);
 
         let stream = TcpStream::connect(address).await?;
 
         let (r, w) = stream.into_split();
 
-        let mut writer = FramedWrite::new(w, codec::ByteLinesCodec::new());
-        let mut reader = FramedRead::new(r, codec::ByteLinesCodec::new());
+        let writer = FramedWrite::new(w, codec::ByteLinesCodec::new());
+        let reader = FramedRead::new(r, codec::ByteLinesCodec::new());
 
+        Ok((reader, writer))
+    }
+
+    async fn login(settings: &ISSettings, writer: &mut Writer) -> io::Result<()> {
         let login_message = {
             let name = option_env!("CARGO_PKG_NAME").unwrap_or("unknown");
             let version = option_env!("CARGO_PKG_VERSION").unwrap_or("0.0.0");
 
             format!(
                 "user {} pass {} vers {} {}{}",
-                self.settings.callsign,
-                self.settings.passcode,
+                settings.callsign,
+                settings.passcode,
                 name,
                 version,
-                if self.settings.filter.is_empty() {
+                if settings.filter.is_empty() {
                     "".to_string()
                 } else {
-                    format!(" filter {}", self.settings.filter)
+                    format!(" filter {}", settings.filter)
                 }
             )
         };
@@ -104,45 +186,26 @@ impl IS {
         trace!("Login message: {}", login_message);
         writer.send(login_message.as_bytes()).await?;
 
+        Ok(())
+    }
+
+    async fn heartbeat(writer: Arc<Mutex<Writer>>) -> JoinHandle<()> {
+        // Automatically terminates once the reader and writer are dropped
         tokio::spawn(async move {
             let mut interval = time::interval(Duration::from_secs(3600));
             loop {
                 interval.tick().await;
                 info!("Sending keep alive message to APRS-IS server");
-                writer.send("# keep alive".as_bytes()).await.unwrap();
-            }
-        });
-
-        while let Some(packet) = reader.next().await {
-            match packet {
-                Ok(packet) => {
-                    if packet[0] == b'#' {
-                        match String::from_utf8(packet.to_vec()) {
-                            Ok(server_message) => {
-                                trace!("Received server response: {}", server_message);
-                                if server_message.contains("unverified") {
-                                    info!("User not verified on APRS-IS server");
-                                    continue;
-                                }
-                                if server_message.contains(" verified") {
-                                    info!("User verified on APRS-IS server");
-                                }
-                            }
-                            Err(err) => warn!("Error processing server response: {}", err),
-                        }
-                    } else {
-                        trace!("{:?}", packet);
-                        (self.packet_handler)(APRSPacket {
-                            raw: packet.to_vec(),
-                        });
-                    }
-                }
-                Err(err) => {
-                    warn!("Error processing packet from APRS-IS server: {}", err);
+                if writer
+                    .lock()
+                    .await
+                    .send("# keep alive".as_bytes())
+                    .await
+                    .is_err()
+                {
+                    break;
                 }
             }
-        }
-
-        Ok(())
+        })
     }
 }
