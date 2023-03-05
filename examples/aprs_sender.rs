@@ -1,7 +1,6 @@
 extern crate pretty_env_logger;
 
-use aprs_parser::{AprsData, AprsMessage, AprsPacket, Callsign};
-use std::convert::TryFrom;
+use aprs_parser::{AprsData, AprsMessage, AprsPacket, Callsign, Via};
 use std::env;
 
 use simple_aprs::*;
@@ -26,10 +25,11 @@ async fn main() {
     );
 
     let packet = AprsPacket {
-        from: Callsign::try_from(callsign.as_bytes()).unwrap(),
-        to: Callsign::try_from(to.as_bytes()).unwrap(),
-        via: vec![Callsign::new("TCPIP*", None)],
+        from: Callsign::new(&callsign).unwrap(),
+        via: vec![Via::Callsign(Callsign::new_no_ssid("TCPIP"), true)],
         data: AprsData::Message(AprsMessage {
+            to: Callsign::new_no_ssid("APRS"),
+
             addressee: to.as_bytes().to_vec(),
             text: msg.as_bytes().to_vec(),
             id: None,

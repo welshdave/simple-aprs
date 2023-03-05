@@ -2,9 +2,8 @@
 /// When we see one, respond with the specified message
 extern crate pretty_env_logger;
 
-use aprs_parser::{AprsData, AprsMessage, AprsPacket, Callsign};
+use aprs_parser::{AprsData, AprsMessage, AprsPacket, Callsign, Via};
 use futures::stream::StreamExt;
-use std::convert::TryFrom;
 use std::env;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -26,8 +25,8 @@ async fn main() {
     let passcode = args.get::<String>("passcode").unwrap();
     let msg = args.get::<String>("message").unwrap();
 
-    let us = Callsign::try_from(callsign.as_bytes()).unwrap();
-    let them = Callsign::try_from(from_callsign.as_bytes()).unwrap();
+    let us = Callsign::new(&callsign).unwrap();
+    let them = Callsign::new(&from_callsign).unwrap();
 
     let settings = ISSettings::new(
         "euro.aprs2.net".to_string(),
@@ -42,7 +41,11 @@ async fn main() {
         .expect("An error occurred while connecting")
         .split();
 
-    let last_ping = Arc::new(Mutex::new(Instant::now() - Duration::from_secs(3600)));
+    let last_ping = Arc::new(Mutex::new(
+        Instant::now()
+            .checked_sub(Duration::from_secs(3600))
+            .unwrap(),
+    ));
     r.stream()
         .for_each(|x| async {
             if let Ok(Ok(pkt)) = x.map(|y| y.parsed()) {
@@ -53,9 +56,9 @@ async fn main() {
                     if Instant::now() > *last_ping.lock().await + min_duration {
                         let resp = AprsPacket {
                             from: us.clone(),
-                            to: them.clone(),
-                            via: vec![Callsign::new("TCPIP*", None)],
+                            via: vec![Via::Callsign(Callsign::new_no_ssid("TCPIP"), true)],
                             data: AprsData::Message(AprsMessage {
+                                to: Callsign::new_no_ssid("APRS"),
                                 addressee: from_callsign.as_bytes().to_vec(),
                                 text: msg.as_bytes().to_vec(),
                                 id: None,
