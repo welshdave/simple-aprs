@@ -9,7 +9,9 @@ async fn aprs_packet_handler(packet: RawPacket) {
     match packet.parsed() {
         Ok(parsed) => {
             println!("Source: {}", parsed.from);
-            println!("Destination: {}", parsed.to);
+            if let Some(to) = parsed.to() {
+                println!("Destination: {}", to);
+            }
         }
         Err(err) => {
             println!("Error parsing packet: {}", err);

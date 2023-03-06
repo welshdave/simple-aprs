@@ -2,7 +2,7 @@ mod abort;
 mod codec;
 mod error;
 
-use aprs_parser::{AprsError, AprsPacket};
+use aprs_parser::{AprsPacket, DecodeError};
 use async_stream::try_stream;
 use futures::sink::SinkExt;
 use futures::{Stream, StreamExt};
@@ -27,8 +27,8 @@ pub struct RawPacket {
 }
 
 impl RawPacket {
-    pub fn parsed(&self) -> Result<AprsPacket, AprsError> {
-        aprs_parser::parse(&self.raw)
+    pub fn parsed(&self) -> Result<AprsPacket, DecodeError> {
+        AprsPacket::decode_textual(&self.raw)
     }
 }
 
@@ -106,7 +106,7 @@ pub struct ISWriter {
 impl ISWriter {
     pub async fn send(&mut self, packet: &AprsPacket) -> Result<(), error::ISSendError> {
         let mut buf = vec![];
-        packet.encode(&mut buf)?;
+        packet.encode_textual(&mut buf)?;
 
         self.writer.lock().await.send(&buf).await?;
 
