@@ -1,6 +1,6 @@
 [package]
 name = "simple-aprs"
-version = "0.3.1"
+version = "0.3.2"
 authors = ["Dave Lewis <dave@dllewis.org>"]
 edition = "2018"
 description = "APRS Library to interact with APRS-IS servers"
