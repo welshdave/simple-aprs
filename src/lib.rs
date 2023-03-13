@@ -19,6 +19,10 @@ use tokio::task::JoinHandle;
 use tokio::time;
 use tokio_util::codec::{FramedRead, FramedWrite};
 
+// how many seconds to wait for a line from the APRS-IS server
+// used to detect a connection that has hanged
+const HEARTBEAT_TIME: u64 = 60;
+
 type Reader = FramedRead<OwnedReadHalf, codec::ByteLinesCodec>;
 type Writer = FramedWrite<OwnedWriteHalf, codec::ByteLinesCodec>;
 
@@ -70,7 +74,7 @@ pub struct ISReader {
 impl ISReader {
     pub fn stream(&mut self) -> impl Stream<Item = Result<RawPacket, error::ISReadError>> + '_ {
         try_stream! {
-            while let Some(packet) = self.reader.next().await {
+            while let Some(packet) = tokio::time::timeout(Duration::from_secs(HEARTBEAT_TIME), self.reader.next()).await? {
                 let packet = packet?;
                 if packet[0] == b'#' {
                     let server_message = String::from_utf8(packet.to_vec())?;
